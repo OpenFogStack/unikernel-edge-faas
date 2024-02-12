@@ -1,0 +1,21 @@
+2023-09-28T13:17:31.594739032 [anonymous-instance:main:WARN:src/devices/src/legacy/serial.rs:257] Failed to register serial input fd: event_manager: failed to manage epoll file descriptor: Operation not permitted (os error 1)
+OSv v0.57.0-58-gd620c799
+eth0: 10.10.0.2
+Booted up in 68.67 ms
+Cmdline: /benchmark.so http://10.10.0.1:3000/ready root=/dev/vda rw  
+Go version: go1.18.1, listening on port 8080 ...
+Reading static file from /static_file
+Calling callback at http://10.10.0.1:3000/ready
+/home/felix/.local/bin/firecracker: Killed
+
+ Performance counter stats for '/home/felix/.local/bin/firecracker --no-api --config-file configs/osv-zfs.json':
+
+       487,207,093      instructions                     #    1.62  insn per cycle            
+       299,976,533      cpu-cycles                                                            
+
+       0.224728056 seconds time elapsed
+
+       0.068196000 seconds user
+       0.020057000 seconds sys
+
+

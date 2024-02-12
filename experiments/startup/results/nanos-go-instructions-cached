@@ -1,0 +1,30 @@
+2023-09-28T13:17:13.706341935 [anonymous-instance:main:WARN:src/devices/src/legacy/serial.rs:257] Failed to register serial input fd: event_manager: failed to manage epoll file descriptor: Operation not permitted (os error 1)
+found netarg
+found netarg
+found netarg
+found callback arg
+warning: ACPI MADT not found, default to 1 processor
+ip overwritten by cmdline
+netmask overwritten by cmdline
+gateway overwritten by cmdline
+NET: static IP config for interface en1:
+ address	10.10.0.2
+ netmask	255.255.255.0
+ gateway	10.10.0.1
+en1: assigned 10.10.0.2
+Go version: go1.21.0, listening on port 8080 ...
+Reading static file from /static/static_file
+Calling callback at http://10.10.0.1:3000/ready
+/home/felix/.local/bin/firecracker: Killed
+
+ Performance counter stats for '/home/felix/.local/bin/firecracker --no-api --config-file configs/nanos.json':
+
+       105,918,666      instructions                     #    0.94  insn per cycle            
+       112,792,077      cpu-cycles                                                            
+
+       0.144591391 seconds time elapsed
+
+       0.008501000 seconds user
+       0.029755000 seconds sys
+
+

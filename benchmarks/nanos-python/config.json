@@ -1,0 +1,11 @@
+{
+    "Args": [],
+    "Version": "v1.0.0",
+    "RunConfig": {
+        "IPAddress": "10.10.0.2",
+        "NetMask": "255.255.255.0",
+        "Gateway": "10.10.0.1",
+        "IPv6Address": "FE80::46F:65FF:FE9C:4861"
+    },
+    "BaseVolumeSz": "200m"
+}

@@ -1,0 +1,25 @@
+{
+  "boot-source": {
+    "boot_args": "net.ip=10.10.0.2 net.gw=10.10.0.1 net.mask=255.255.255.0 callback.url=http://10.10.0.1:3000/ready",
+    "kernel_image_path": "/home/felix/src/benchmark/nanos/build/kernel.img"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "is_read_only": false,
+      "is_root_device": true,
+      "path_on_host": "/home/felix/src/benchmark/nanos/build/benchmark.img"
+    }
+  ],
+  "machine-config": {
+    "mem_size_mib": 512,
+    "vcpu_count": 1
+  },
+  "network-interfaces": [
+    {
+      "guest_mac": "AA:FC:00:00:00:01",
+      "host_dev_name": "tap0",
+      "iface_id": "eth0"
+    }
+  ]
+}

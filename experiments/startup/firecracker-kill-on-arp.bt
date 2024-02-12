@@ -1,0 +1,73 @@
+#!/usr/bin/env bpftrace
+
+#include <net/sock.h>
+
+/* Detect start of firecracker process and save the pid. */
+tracepoint:syscalls:sys_enter_execve
+/strcontains(str(args->filename), "firecracker")/
+{
+	printf("[%-15s] is starting firecracker (pid %d)\n", comm, pid);
+	@fcpid = pid;
+	@startup_time = nsecs;
+}
+
+/*
+ * ARP request tracing
+ *
+ * We want to know when the guest starts invoking the ready callback, which
+ * will involve an arp request before setting up the TCP connection.
+ * Sending an arp request via the tap device from the guest will call
+ * arp_rcv in the firecracker process context. Some guests send an gratuitous
+ * request during boot, which we need to detect (and ignore).
+ * Since the kernel will not respond to gratuitous requests we can detect this
+ * by checking if arp_xmit is called during the receive path
+ * So these probes should fire in the following order:
+ *
+ * 	1. kfunc:vmlinux:arp_rcv
+ *	2. kfunc:vmlinux:arp_xmit (optional)
+ *	3. kretfunc:vmlinux:arp_rcv
+ *
+ * If we see an actual ARP request we kill the current process.
+ */
+
+kfunc:vmlinux:arp_rcv
+/pid == @fcpid/
+{
+	/* Record when we start processing the request */
+	@arp_rcv_start[tid] = nsecs;
+}
+
+kretfunc:vmlinux:arp_rcv
+/@arp_rcv_start[tid]/
+{
+	/* Send signal as soon as possible... */
+	if (@arp_is_not_garp[tid]) {
+		signal("KILL");
+	}
+
+	$time = @arp_rcv_start[tid] - @startup_time;
+	$garp = "(request)";
+	if (!@arp_is_not_garp[tid]) {
+		$garp = "(gratuitous)";
+	}
+
+	printf("[%-15s] ARP %s after %lu nsecs\n", comm, $garp, $time);
+
+	if (@arp_is_not_garp[tid]) {
+		printf("Killing firecracker process\n");
+	}
+
+	delete(@arp_rcv_start[tid]);
+	delete(@arp_is_not_garp[tid]);
+
+}
+
+kfunc:vmlinux:arp_xmit
+/@arp_rcv_start[tid]/
+{
+	/*
+	 * If we got here this is not an gratuitous arp request
+	 * as the kernel will usually not reply to those.
+	 */
+	@arp_is_not_garp[tid] = 1;
+}

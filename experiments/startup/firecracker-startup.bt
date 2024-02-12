@@ -1,0 +1,381 @@
+#!/usr/bin/env bpftrace
+
+#include <net/sock.h>
+
+/*
+ * Firecracker startup
+ *
+ * To record the time at which the firecracker process starts
+ * we trace all execve calls and look for the firecracker binary.
+ * The time is recorded in @startup_time and used later to calculate
+ * the elapsed time.
+ *
+ * Firecracker runs one thread for setup and device emulation called
+ * 'firecracker'. In addition there is one thread named 'fc_vcpu n'
+ * for each virtual cpu n.
+ * We detect the start of the vcpu by recording the creation time of
+ * the 'fc_vcpu 0' thread.
+ * In addition we also record the time when the 'fc_vcpu 0' thread invokes
+ * the 'vcpu_run' function for the first time, which can be considered the
+ * point at which the guest actually starts booting.
+ */
+tracepoint:syscalls:sys_enter_execve
+/strcontains(str(args->filename), "firecracker")/
+{
+	printf("[%-15s] is starting firecracker (pid %d)\n", comm, pid);
+	@fcpid = pid;
+	@startup_time = nsecs;
+}
+
+tracepoint:syscalls:sys_enter_clone
+/pid == @fcpid/
+{
+	$time = nsecs - @startup_time;
+	printf("[%-15s] called clone after %lu nsecs\n", comm, $time);
+	print(@file_read);
+	print(@file_time);
+}
+
+kprobe:vcpu_run
+/pid == @fcpid && !@vcpu_run_done[tid]/
+{
+	$time = nsecs - @startup_time;
+	printf("[%-15s] vcpu_run first invocation after %lu nsecs\n",
+		comm, $time);
+
+	/* We only want to record the first invocation */
+	@vcpu_run_done[tid] = 1;
+}
+
+/* TAP interface tracing */
+
+tracepoint:syscalls:sys_enter_open
+/pid == @fcpid/
+{
+	if (strcontains(str(args->filename), "/dev/net/tun")) {
+		@opening_tap[tid] = 1;
+		printf("[%-15s] opening /dev/net/tun\n", comm);
+	}
+}
+
+tracepoint:syscalls:sys_exit_open
+/@opening_tap[tid]/
+{
+	$fd = args->ret;
+
+	printf("[%-15s] fd for tap interface is %d\n", comm, $fd);
+	if ($fd >= 0) {
+		@tapfd = (uint64)$fd;
+	}
+	delete(@opening_tap[tid]);
+}
+
+tracepoint:syscalls:sys_enter_write,
+tracepoint:syscalls:sys_enter_writev
+/!@tap_done && pid == @fcpid && @tapfd >= 0 && @tapfd == args->fd/
+{
+	$time = nsecs - @startup_time;
+
+	printf("[%-15s] first write to tap interface after %lu nsecs\n", comm, $time);
+
+	/* We only want to record the first write */
+	@tap_done = 1;
+}
+
+kfunc:vmlinux:vfs_read
+/pid == @fcpid/
+{
+	@in_vfs_read[tid] = nsecs;
+}
+
+kretfunc:vmlinux:vfs_read
+/@in_vfs_read[tid]/
+{
+	$f = args->file;
+	$name = str($f->f_path.dentry->d_name.name);
+	$name2 = str($f->f_path.dentry->d_name.name);
+	$name3 = str($f->f_path.dentry->d_name.name);
+	$size = retval;
+	$time = nsecs - @in_vfs_read[tid];
+
+	if ($size > 0) {
+		@file_read[$name] = sum($size);
+	}
+	@file_time[$name2] = sum($time);
+	// printf("reading from %s\n", $name3);
+	// @nreads[$name3] = count();
+	// @treads[$name3] = hist($time);
+	// @sreads[$name2] = hist($size);
+
+	delete(@in_vfs_read[tid]);
+}
+
+/*
+ * TCP connection tracing
+ *
+ * We want to know when we receive the ready callback.
+ * Attach a probe that fires on tcp_recvmsg calls.
+ * This will be invoked in the process context of the callback server.
+ * However, since we don't know the pid of the callback server we trace
+ * all receives and check the source IP address in the sk.
+ */
+
+kprobe:tcp_recvmsg
+{
+	$time = nsecs - @startup_time;
+	$sk = (struct sock *)arg0;
+	$af = $sk->__sk_common.skc_family;
+
+	/* might be IPv6... */
+	if ($af != AF_INET) {
+		return;
+	}
+
+	$dst = $sk->__sk_common.skc_daddr;
+	$src = $sk->__sk_common.skc_rcv_saddr;
+	if ($src == 0x1000a0a /* 10.10.0.1 */) {
+		printf("[%-15s] tcp_recvmsg %s -> %s after %lu nsecs\n",
+			comm, ntop($src), ntop($dst), $time);
+
+		/*
+		 * We consider the startup done once we have received the read
+		 * callback, so stop the tracing.
+		 * The exit call happens asynchronously, so we output the
+		 * recorded function execution times right here, because the
+		 * probes will continue to fire until we have actually exited,
+		 * which will give us incorrect results.
+		 */
+		print(@execution_time);
+		print(@file_read);
+		print(@file_time);
+		exit();
+	}
+}
+
+/*
+ * ARP request tracing
+ *
+ * We want to know when the guest starts invoking the ready callback, which
+ * will involve an arp request before setting up the TCP connection.
+ * Sending an arp request via the tap device from the guest will call
+ * arp_rcv in the firecracker process context. Some guests send an gratuitous
+ * request during boot, which we need to detect (and ignore).
+ * Since the kernel will not respond to gratuitous requests we can detect this
+ * by checking if arp_xmit is called during the receive path
+ * So these probes should fire in the following order:
+ *
+ * 	1. kfunc:vmlinux:arp_rcv
+ *	2. kfunc:vmlinux:arp_xmit (optional)
+ *	3. kretfunc:vmlinux:arp_rcv
+ */
+
+kfunc:vmlinux:arp_rcv
+/pid == @fcpid/
+{
+	/* Record when we start processing the request */
+	@arp_rcv_start[tid] = nsecs;
+}
+
+kretfunc:vmlinux:arp_rcv
+/@arp_rcv_start[tid]/
+{
+	$time = @arp_rcv_start[tid] - @startup_time;
+	$garp = "(request)";
+	if (!@arp_is_not_garp[tid]) {
+		$garp = "(gratuitous)";
+	}
+
+	printf("[%-15s] ARP %s after %lu nsecs\n", comm, $garp, $time);
+
+	delete(@arp_rcv_start[tid]);
+	delete(@arp_is_not_garp[tid]);
+}
+
+kfunc:vmlinux:arp_xmit
+/@arp_rcv_start[tid]/
+{
+	/*
+	 * If we got here this is not an gratuitous arp request
+	 * as the kernel will usually not reply to those.
+	 */
+	@arp_is_not_garp[tid] = 1;
+}
+
+/*
+ * KVM function tracing
+ * 
+ * The 'fc_vcpu 0' thread is responsible for executing the virtual cpu.
+ * This is done by issuing a specific KVM_RUN ioctl on the kvm device.
+ * On x86 this eventually calls the 'vcpu_run' function, which does several
+ * things.
+ * 1. If the vcpu is halted e.g. when the guest executes a HLT instruction
+ *    the function kvm_vcpu_halt is called, which eventually invokes the
+ *    scheduler.
+ * 2. To execute guest instruction 'vcpu_enter_guest' is called, which in
+ *    turn spends most of its time either calling 'vmx_handle_exit' to
+ *    handle guest exits, of which the majority is spent handling guest page
+ *    faults in 'kvm_mmu_page faults'.
+ *    Or the 'vmx_vcpu_run' function is called, which will switch to the guest
+ *    context through VMLAUNCH/VMRESUME instructions.
+ *
+ * So the call graph looks like this:
+ *    vcpu_run
+ *    |-> kvm_vcpu_halt
+ *    |-> vcpu_enter_guest
+ *        |-> vmx_handle_exit
+ *        |   |-> kvm_mmu_page_fault
+ *        |-> vmx_vpu_run
+ *
+ * Tracing these functions gives us a good indication of what we spend the
+ * majority of the time doing.
+ * Executing in kernel space (vcpu_run), doing nothing waiting for an
+ * interrupt (kvm_vcpu_halt), handling page faults (kvm_mmu_page_fault),
+ * or actually executing guest instructions on the CPU (vmx_vcpu_run).
+ */
+
+/* FUNC */
+kprobe:vcpu_run,
+/pid == @fcpid/
+{
+	$name = "vcpu_run";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:vcpu_run,
+/@func_enter[tid, "vcpu_run"]/
+{
+	$name = "vcpu_run";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "vcpu_run"]);
+}
+
+/* FUNC */
+kprobe:kvm_vcpu_halt,
+/pid == @fcpid/
+{
+	$name = "kvm_vcpu_halt";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:kvm_vcpu_halt,
+/@func_enter[tid, "kvm_vcpu_halt"]/
+{
+	$name = "kvm_vcpu_halt";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "kvm_vcpu_halt"]);
+}
+
+/* FUNC */
+kprobe:vcpu_enter_guest,
+/pid == @fcpid/
+{
+	$name = "vcpu_enter_guest";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:vcpu_enter_guest,
+/@func_enter[tid, "vcpu_enter_guest"]/
+{
+	$name = "vcpu_enter_guest";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "vcpu_enter_guest"]);
+}
+
+/* FUNC */
+kprobe:vmx_handle_exit,
+/pid == @fcpid/
+{
+	$name = "vmx_handle_exit";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:vmx_handle_exit,
+/@func_enter[tid, "vmx_handle_exit"]/
+{
+	$name = "vmx_handle_exit";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "vmx_handle_exit"]);
+}
+
+/* FUNC */
+kprobe:kvm_mmu_page_fault,
+/pid == @fcpid/
+{
+	$name = "kvm_mmu_page_fault";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:kvm_mmu_page_fault,
+/@func_enter[tid, "kvm_mmu_page_fault"]/
+{
+	$name = "kvm_mmu_page_fault";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "kvm_mmu_page_fault"]);
+}
+
+/* FUNC */
+kprobe:vmx_vcpu_run,
+/pid == @fcpid/
+{
+	$name = "vmx_vcpu_run";
+
+	if (@func_enter[tid, $name]) {
+		printf("WARN %s called recursively\n", probe);
+	}
+
+	@func_enter[tid, $name] = nsecs;
+}
+
+kretprobe:vmx_vcpu_run,
+/@func_enter[tid, "vmx_vcpu_run"]/
+{
+	$name = "vmx_vcpu_run";
+	$time = nsecs - @func_enter[tid, $name];
+	@execution_time[comm, $name] = sum($time);
+	delete(@func_enter[tid, "vmx_vcpu_run"]);
+}
+
+END
+{
+	printf("EXIT after %lu nsecs\n", nsecs - @startup_time);
+	clear(@startup_time);
+	clear(@tap_done);
+	clear(@tapfd);
+	clear(@fcpid);
+	clear(@vcpu_run_done);
+	clear(@func_enter);
+	clear(@execution_time);
+	clear(@file_read);
+	clear(@file_time);
+}
+

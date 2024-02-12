@@ -1,0 +1,5 @@
+/python3: ->/python.so
+/lib64: ->/lib
+
+/server.py: ${MODULE_DIR}/server.py
+/**: ${MODULE_DIR}/ROOTFS/**

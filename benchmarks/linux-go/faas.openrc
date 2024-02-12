@@ -1,0 +1,8 @@
+#!/sbin/openrc-run
+
+command="/bin/benchmark"
+command_args=$(sed "s/.*callback=\([^ ]*\).*/\1/" /proc/cmdline)
+pidfile="/run/${RC_SVCNAME}.pid"
+command_background=true
+output_log="/var/log/benchmark.log"
+error_log="/var/log/benchmark.err"

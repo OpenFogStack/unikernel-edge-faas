@@ -1,0 +1,13 @@
+target,language,file,size
+linux,go,kernel,37735744
+linux,go,rootfs,8580096
+linux,node,kernel,37735744
+linux,node,rootfs,34868224
+nanos,go,kernel,1546764
+nanos,go,rootfs,10079744
+nanos,node,kernel,1546764
+nanos,node,rootfs,76817920
+osv,go,kernel,6296156
+osv,go,rootfs,4746240
+osv,node,kernel,6296156
+osv,node,rootfs,25532416

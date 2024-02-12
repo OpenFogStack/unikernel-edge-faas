@@ -1,0 +1,25 @@
+{
+  "boot-source": {
+    "boot_args": "--ip=eth0,10.10.0.2,255.255.255.0 --defaultgw=10.10.0.1 --nameserver=10.10.0.1 --rootfs=zfs /benchmark.so http://10.10.0.1:3000/ready",
+    "kernel_image_path": "/home/felix/src/benchmark/osv/build-zfs/loader-stripped.elf"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "is_read_only": false,
+      "is_root_device": true,
+      "path_on_host": "/home/felix/src/benchmark/osv/build-zfs/benchmark.raw"
+    }
+  ],
+  "machine-config": {
+    "mem_size_mib": 512,
+    "vcpu_count": 1
+  },
+  "network-interfaces": [
+    {
+      "guest_mac": "AA:FC:00:00:00:01",
+      "host_dev_name": "tap0",
+      "iface_id": "eth0"
+    }
+  ]
+}

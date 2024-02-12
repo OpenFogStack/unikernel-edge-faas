@@ -1,0 +1,897 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="518" onload="init(evt)" viewBox="0 0 1200 518" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="518.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="501" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="501" > </text>
+<g id="frames">
+<g >
+<title>__hrtimer_start_range_ns (49,750 samples, 2.60%)</title><rect x="189.5" y="261" width="30.8" height="15.0" fill="rgb(234,166,9)" rx="2" ry="2" />
+<text  x="192.53" y="271.5" >__..</text>
+</g>
+<g >
+<title>update_load_avg (88,246 samples, 4.62%)</title><rect x="400.2" y="213" width="54.5" height="15.0" fill="rgb(239,57,43)" rx="2" ry="2" />
+<text  x="403.19" y="223.5" >updat..</text>
+</g>
+<g >
+<title>update_process_times (36,436 samples, 1.91%)</title><rect x="1072.2" y="133" width="22.5" height="15.0" fill="rgb(215,208,23)" rx="2" ry="2" />
+<text  x="1075.24" y="143.5" >u..</text>
+</g>
+<g >
+<title>sysvec_apic_timer_interrupt (51,813 samples, 2.71%)</title><rect x="1072.2" y="229" width="32.0" height="15.0" fill="rgb(242,174,15)" rx="2" ry="2" />
+<text  x="1075.24" y="239.5" >sy..</text>
+</g>
+<g >
+<title>send_call_function_single_ipi (36,436 samples, 1.91%)</title><rect x="1072.2" y="37" width="22.5" height="15.0" fill="rgb(207,21,31)" rx="2" ry="2" />
+<text  x="1075.24" y="47.5" >s..</text>
+</g>
+<g >
+<title>complete_emulated_mmio (59,003 samples, 3.09%)</title><rect x="10.0" y="341" width="36.5" height="15.0" fill="rgb(223,176,18)" rx="2" ry="2" />
+<text  x="13.00" y="351.5" >com..</text>
+</g>
+<g >
+<title>schedule (513,065 samples, 26.86%)</title><rect x="360.0" y="293" width="317.0" height="15.0" fill="rgb(215,95,9)" rx="2" ry="2" />
+<text  x="363.03" y="303.5" >schedule</text>
+</g>
+<g >
+<title>dequeue_task_fair (65,008 samples, 3.40%)</title><rect x="454.7" y="261" width="40.2" height="15.0" fill="rgb(236,102,30)" rx="2" ry="2" />
+<text  x="457.71" y="271.5" >deq..</text>
+</g>
+<g >
+<title>native_write_msr (1,902 samples, 0.10%)</title><rect x="1071.1" y="181" width="1.1" height="15.0" fill="rgb(251,209,54)" rx="2" ry="2" />
+<text  x="1074.06" y="191.5" ></text>
+</g>
+<g >
+<title>kvm_apic_has_interrupt (44,573 samples, 2.33%)</title><rect x="677.0" y="293" width="27.5" height="15.0" fill="rgb(237,205,36)" rx="2" ry="2" />
+<text  x="680.00" y="303.5" >k..</text>
+</g>
+<g >
+<title>__update_load_avg_cfs_rq (43,706 samples, 2.29%)</title><rect x="427.7" y="197" width="27.0" height="15.0" fill="rgb(246,205,10)" rx="2" ry="2" />
+<text  x="430.71" y="207.5" >_..</text>
+</g>
+<g >
+<title>asm_sysvec_apic_timer_interrupt (51,813 samples, 2.71%)</title><rect x="1072.2" y="245" width="32.0" height="15.0" fill="rgb(209,26,16)" rx="2" ry="2" />
+<text  x="1075.24" y="255.5" >as..</text>
+</g>
+<g >
+<title>__x64_sys_ioctl (1,451,397 samples, 75.99%)</title><rect x="10.0" y="389" width="896.7" height="15.0" fill="rgb(251,187,35)" rx="2" ry="2" />
+<text  x="13.00" y="399.5" >__x64_sys_ioctl</text>
+</g>
+<g >
+<title>vmx_vcpu_load (65,008 samples, 3.40%)</title><rect x="529.0" y="213" width="40.1" height="15.0" fill="rgb(235,72,10)" rx="2" ry="2" />
+<text  x="531.98" y="223.5" >vmx..</text>
+</g>
+<g >
+<title>vmx_interrupt_allowed (44,540 samples, 2.33%)</title><rect x="332.5" y="245" width="27.5" height="15.0" fill="rgb(231,144,30)" rx="2" ry="2" />
+<text  x="335.51" y="255.5" >v..</text>
+</g>
+<g >
+<title>kvm_arch_vcpu_load (65,008 samples, 3.40%)</title><rect x="529.0" y="229" width="40.1" height="15.0" fill="rgb(227,15,24)" rx="2" ry="2" />
+<text  x="531.98" y="239.5" >kvm..</text>
+</g>
+<g >
+<title>start_sw_tscdeadline (106,382 samples, 5.57%)</title><rect x="154.5" y="293" width="65.8" height="15.0" fill="rgb(218,38,38)" rx="2" ry="2" />
+<text  x="157.54" y="303.5" >start_s..</text>
+</g>
+<g >
+<title>intel_pmu_enable_all (1,902 samples, 0.10%)</title><rect x="1071.1" y="197" width="1.1" height="15.0" fill="rgb(227,115,47)" rx="2" ry="2" />
+<text  x="1074.06" y="207.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (1,451,397 samples, 75.99%)</title><rect x="10.0" y="405" width="896.7" height="15.0" fill="rgb(250,28,43)" rx="2" ry="2" />
+<text  x="13.00" y="415.5" >do_syscall_64</text>
+</g>
+<g >
+<title>vmx_vcpu_run (43,706 samples, 2.29%)</title><rect x="879.7" y="309" width="27.0" height="15.0" fill="rgb(209,222,16)" rx="2" ry="2" />
+<text  x="882.67" y="319.5" >v..</text>
+</g>
+<g >
+<title>perf_ctx_enable (6,374 samples, 0.33%)</title><rect x="1068.3" y="229" width="3.9" height="15.0" fill="rgb(235,42,16)" rx="2" ry="2" />
+<text  x="1071.30" y="239.5" ></text>
+</g>
+<g >
+<title>update_rq_clock (78,763 samples, 4.12%)</title><rect x="1104.2" y="261" width="48.7" height="15.0" fill="rgb(245,205,27)" rx="2" ry="2" />
+<text  x="1107.25" y="271.5" >upda..</text>
+</g>
+<g >
+<title>enqueue_hrtimer (49,750 samples, 2.60%)</title><rect x="189.5" y="245" width="30.8" height="15.0" fill="rgb(207,187,39)" rx="2" ry="2" />
+<text  x="192.53" y="255.5" >en..</text>
+</g>
+<g >
+<title>__perf_event_task_sched_in (6,374 samples, 0.33%)</title><rect x="1068.3" y="245" width="3.9" height="15.0" fill="rgb(245,10,24)" rx="2" ry="2" />
+<text  x="1071.30" y="255.5" ></text>
+</g>
+<g >
+<title>ioctl (1,713,010 samples, 89.69%)</title><rect x="10.0" y="437" width="1058.3" height="15.0" fill="rgb(228,211,1)" rx="2" ry="2" />
+<text  x="13.00" y="447.5" >ioctl</text>
+</g>
+<g >
+<title>intel_pmu_enable_all (11,115 samples, 0.58%)</title><rect x="494.9" y="197" width="6.8" height="15.0" fill="rgb(227,115,47)" rx="2" ry="2" />
+<text  x="497.87" y="207.5" ></text>
+</g>
+<g >
+<title>kvm_arch_vcpu_ioctl_run (1,451,397 samples, 75.99%)</title><rect x="10.0" y="357" width="896.7" height="15.0" fill="rgb(237,200,11)" rx="2" ry="2" />
+<text  x="13.00" y="367.5" >kvm_arch_vcpu_ioctl_run</text>
+</g>
+<g >
+<title>vcpu_enter_guest (327,187 samples, 17.13%)</title><rect x="704.5" y="325" width="202.2" height="15.0" fill="rgb(230,139,3)" rx="2" ry="2" />
+<text  x="707.54" y="335.5" >vcpu_enter_guest</text>
+</g>
+<g >
+<title>__sysvec_apic_timer_interrupt (51,813 samples, 2.71%)</title><rect x="1072.2" y="213" width="32.0" height="15.0" fill="rgb(238,87,33)" rx="2" ry="2" />
+<text  x="1075.24" y="223.5" >__..</text>
+</g>
+<g >
+<title>do_epoll_wait (136,950 samples, 7.17%)</title><rect x="1068.3" y="357" width="84.6" height="15.0" fill="rgb(220,197,1)" rx="2" ry="2" />
+<text  x="1071.30" y="367.5" >do_epoll_..</text>
+</g>
+<g >
+<title>do_epoll_pwait.part.0 (136,950 samples, 7.17%)</title><rect x="1068.3" y="373" width="84.6" height="15.0" fill="rgb(254,1,14)" rx="2" ry="2" />
+<text  x="1071.30" y="383.5" >do_epoll_..</text>
+</g>
+<g >
+<title>hrtimer_interrupt (36,436 samples, 1.91%)</title><rect x="1072.2" y="197" width="22.5" height="15.0" fill="rgb(220,97,35)" rx="2" ry="2" />
+<text  x="1075.24" y="207.5" >h..</text>
+</g>
+<g >
+<title>perf_ctx_enable (11,115 samples, 0.58%)</title><rect x="494.9" y="229" width="6.8" height="15.0" fill="rgb(235,42,16)" rx="2" ry="2" />
+<text  x="497.87" y="239.5" ></text>
+</g>
+<g >
+<title>pick_next_task_idle (44,573 samples, 2.33%)</title><rect x="609.3" y="245" width="27.5" height="15.0" fill="rgb(229,3,4)" rx="2" ry="2" />
+<text  x="612.30" y="255.5" >p..</text>
+</g>
+<g >
+<title>kvm_vcpu_ioctl (1,451,397 samples, 75.99%)</title><rect x="10.0" y="373" width="896.7" height="15.0" fill="rgb(254,192,7)" rx="2" ry="2" />
+<text  x="13.00" y="383.5" >kvm_vcpu_ioctl</text>
+</g>
+<g >
+<title>finish_task_switch.isra.0 (185,222 samples, 9.70%)</title><rect x="494.9" y="261" width="114.4" height="15.0" fill="rgb(222,58,2)" rx="2" ry="2" />
+<text  x="497.87" y="271.5" >finish_task_sw..</text>
+</g>
+<g >
+<title>timerqueue_add (49,750 samples, 2.60%)</title><rect x="189.5" y="229" width="30.8" height="15.0" fill="rgb(252,62,10)" rx="2" ry="2" />
+<text  x="192.53" y="239.5" >ti..</text>
+</g>
+<g >
+<title>vmx_prepare_switch_to_guest (154,044 samples, 8.07%)</title><rect x="784.5" y="309" width="95.2" height="15.0" fill="rgb(232,70,5)" rx="2" ry="2" />
+<text  x="787.50" y="319.5" >vmx_prepare..</text>
+</g>
+<g >
+<title>vmx_cancel_hv_timer (44,091 samples, 2.31%)</title><rect x="220.3" y="293" width="27.2" height="15.0" fill="rgb(206,214,51)" rx="2" ry="2" />
+<text  x="223.27" y="303.5" >v..</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range_clock (136,950 samples, 7.17%)</title><rect x="1068.3" y="309" width="84.6" height="15.0" fill="rgb(222,78,45)" rx="2" ry="2" />
+<text  x="1071.30" y="319.5" >schedule_..</text>
+</g>
+<g >
+<title>__schedule (513,065 samples, 26.86%)</title><rect x="360.0" y="277" width="317.0" height="15.0" fill="rgb(233,151,17)" rx="2" ry="2" />
+<text  x="363.03" y="287.5" >__schedule</text>
+</g>
+<g >
+<title>sched_clock_cpu (78,763 samples, 4.12%)</title><rect x="1104.2" y="245" width="48.7" height="15.0" fill="rgb(244,70,10)" rx="2" ry="2" />
+<text  x="1107.25" y="255.5" >sche..</text>
+</g>
+<g >
+<title>skip_emulated_instruction (43,706 samples, 2.29%)</title><rect x="879.7" y="245" width="27.0" height="15.0" fill="rgb(248,224,54)" rx="2" ry="2" />
+<text  x="882.67" y="255.5" >s..</text>
+</g>
+<g >
+<title>x86_pmu_enable (11,115 samples, 0.58%)</title><rect x="494.9" y="213" width="6.8" height="15.0" fill="rgb(253,90,49)" rx="2" ry="2" />
+<text  x="497.87" y="223.5" ></text>
+</g>
+<g >
+<title>vcpu_enter_guest (65,008 samples, 3.40%)</title><rect x="46.5" y="341" width="40.1" height="15.0" fill="rgb(230,139,3)" rx="2" ry="2" />
+<text  x="49.45" y="351.5" >vcp..</text>
+</g>
+<g >
+<title>x86_emulate_insn (59,003 samples, 3.09%)</title><rect x="10.0" y="309" width="36.5" height="15.0" fill="rgb(216,187,41)" rx="2" ry="2" />
+<text  x="13.00" y="319.5" >x86..</text>
+</g>
+<g >
+<title>pick_next_task (44,573 samples, 2.33%)</title><rect x="609.3" y="261" width="27.5" height="15.0" fill="rgb(230,65,28)" rx="2" ry="2" />
+<text  x="612.30" y="271.5" >p..</text>
+</g>
+<g >
+<title>dequeue_entity (88,246 samples, 4.62%)</title><rect x="400.2" y="229" width="54.5" height="15.0" fill="rgb(206,166,10)" rx="2" ry="2" />
+<text  x="403.19" y="239.5" >deque..</text>
+</g>
+<g >
+<title>kvm_vcpu_halt (695,200 samples, 36.40%)</title><rect x="247.5" y="325" width="429.5" height="15.0" fill="rgb(233,23,16)" rx="2" ry="2" />
+<text  x="250.51" y="335.5" >kvm_vcpu_halt</text>
+</g>
+<g >
+<title>x86_pmu_enable (1,902 samples, 0.10%)</title><rect x="1071.1" y="213" width="1.1" height="15.0" fill="rgb(253,90,49)" rx="2" ry="2" />
+<text  x="1074.06" y="223.5" ></text>
+</g>
+<g >
+<title>vmx_vmexit (107,941 samples, 5.65%)</title><rect x="1001.6" y="421" width="66.7" height="15.0" fill="rgb(234,149,33)" rx="2" ry="2" />
+<text  x="1004.61" y="431.5" >vmx_vme..</text>
+</g>
+<g >
+<title>vmx_interrupt_blocked (44,540 samples, 2.33%)</title><rect x="332.5" y="229" width="27.5" height="15.0" fill="rgb(223,100,2)" rx="2" ry="2" />
+<text  x="335.51" y="239.5" >v..</text>
+</g>
+<g >
+<title>kvm_arch_vcpu_runnable (138,429 samples, 7.25%)</title><rect x="274.5" y="277" width="85.5" height="15.0" fill="rgb(214,161,20)" rx="2" ry="2" />
+<text  x="277.51" y="287.5" >kvm_arch_v..</text>
+</g>
+<g >
+<title>vmx_sync_pir_to_irr (44,573 samples, 2.33%)</title><rect x="677.0" y="277" width="27.5" height="15.0" fill="rgb(246,222,17)" rx="2" ry="2" />
+<text  x="680.00" y="287.5" >v..</text>
+</g>
+<g >
+<title>all (1,910,000 samples, 100%)</title><rect x="10.0" y="469" width="1180.0" height="15.0" fill="rgb(210,121,25)" rx="2" ry="2" />
+<text  x="13.00" y="479.5" ></text>
+</g>
+<g >
+<title>ep_poll (136,950 samples, 7.17%)</title><rect x="1068.3" y="341" width="84.6" height="15.0" fill="rgb(220,226,31)" rx="2" ry="2" />
+<text  x="1071.30" y="351.5" >ep_poll</text>
+</g>
+<g >
+<title>__perf_event_task_sched_in (11,115 samples, 0.58%)</title><rect x="494.9" y="245" width="6.8" height="15.0" fill="rgb(245,10,24)" rx="2" ry="2" />
+<text  x="497.87" y="255.5" ></text>
+</g>
+<g >
+<title>dequeue_task_fair (88,246 samples, 4.62%)</title><rect x="400.2" y="245" width="54.5" height="15.0" fill="rgb(236,102,30)" rx="2" ry="2" />
+<text  x="403.19" y="255.5" >deque..</text>
+</g>
+<g >
+<title>schedule_hrtimeout_range (136,950 samples, 7.17%)</title><rect x="1068.3" y="325" width="84.6" height="15.0" fill="rgb(250,26,53)" rx="2" ry="2" />
+<text  x="1071.30" y="335.5" >schedule_..</text>
+</g>
+<g >
+<title>kvm_apic_has_interrupt (65,008 samples, 3.40%)</title><rect x="292.3" y="229" width="40.2" height="15.0" fill="rgb(237,205,36)" rx="2" ry="2" />
+<text  x="295.35" y="239.5" >kvm..</text>
+</g>
+<g >
+<title>vmx_sched_in (65,008 samples, 3.40%)</title><rect x="569.1" y="229" width="40.2" height="15.0" fill="rgb(240,110,29)" rx="2" ry="2" />
+<text  x="572.14" y="239.5" >vmx..</text>
+</g>
+<g >
+<title>put_prev_task_fair (65,008 samples, 3.40%)</title><rect x="636.8" y="261" width="40.2" height="15.0" fill="rgb(225,98,33)" rx="2" ry="2" />
+<text  x="639.84" y="271.5" >put..</text>
+</g>
+<g >
+<title>native_write_msr_safe (44,091 samples, 2.31%)</title><rect x="852.4" y="293" width="27.3" height="15.0" fill="rgb(252,190,45)" rx="2" ry="2" />
+<text  x="855.43" y="303.5" >n..</text>
+</g>
+<g >
+<title>vcpu_run (1,327,386 samples, 69.50%)</title><rect x="86.6" y="341" width="820.1" height="15.0" fill="rgb(237,224,4)" rx="2" ry="2" />
+<text  x="89.61" y="351.5" >vcpu_run</text>
+</g>
+<g >
+<title>kvm_vcpu_has_events (44,573 samples, 2.33%)</title><rect x="677.0" y="325" width="27.5" height="15.0" fill="rgb(220,203,50)" rx="2" ry="2" />
+<text  x="680.00" y="335.5" >k..</text>
+</g>
+<g >
+<title>xfd_validate_state (65,008 samples, 3.40%)</title><rect x="744.3" y="293" width="40.2" height="15.0" fill="rgb(240,159,12)" rx="2" ry="2" />
+<text  x="747.34" y="303.5" >xfd..</text>
+</g>
+<g >
+<title>kvm_sched_in (174,107 samples, 9.12%)</title><rect x="501.7" y="245" width="107.6" height="15.0" fill="rgb(237,212,54)" rx="2" ry="2" />
+<text  x="504.74" y="255.5" >kvm_sched_in</text>
+</g>
+<g >
+<title>firecracker (196,990 samples, 10.31%)</title><rect x="1068.3" y="453" width="121.7" height="15.0" fill="rgb(219,2,48)" rx="2" ry="2" />
+<text  x="1071.30" y="463.5" >firecracker</text>
+</g>
+<g >
+<title>smp_call_function_single_async (36,436 samples, 1.91%)</title><rect x="1072.2" y="69" width="22.5" height="15.0" fill="rgb(211,119,10)" rx="2" ry="2" />
+<text  x="1075.24" y="79.5" >s..</text>
+</g>
+<g >
+<title>malloc (60,040 samples, 3.14%)</title><rect x="1152.9" y="437" width="37.1" height="15.0" fill="rgb(220,179,37)" rx="2" ry="2" />
+<text  x="1155.91" y="447.5" >mal..</text>
+</g>
+<g >
+<title>schedule (136,950 samples, 7.17%)</title><rect x="1068.3" y="293" width="84.6" height="15.0" fill="rgb(215,95,9)" rx="2" ry="2" />
+<text  x="1071.30" y="303.5" >schedule</text>
+</g>
+<g >
+<title>sched_clock (78,763 samples, 4.12%)</title><rect x="1104.2" y="229" width="48.7" height="15.0" fill="rgb(219,203,32)" rx="2" ry="2" />
+<text  x="1107.25" y="239.5" >sche..</text>
+</g>
+<g >
+<title>native_write_msr (11,115 samples, 0.58%)</title><rect x="494.9" y="181" width="6.8" height="15.0" fill="rgb(251,209,54)" rx="2" ry="2" />
+<text  x="497.87" y="191.5" ></text>
+</g>
+<g >
+<title>vmx_set_rvi (65,008 samples, 3.40%)</title><rect x="292.3" y="213" width="40.2" height="15.0" fill="rgb(216,116,5)" rx="2" ry="2" />
+<text  x="295.35" y="223.5" >vmx..</text>
+</g>
+<g >
+<title>vmx_vcpu_load_vmcs (65,008 samples, 3.40%)</title><rect x="529.0" y="197" width="40.1" height="15.0" fill="rgb(209,135,1)" rx="2" ry="2" />
+<text  x="531.98" y="207.5" >vmx..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (1,451,397 samples, 75.99%)</title><rect x="10.0" y="421" width="896.7" height="15.0" fill="rgb(230,108,22)" rx="2" ry="2" />
+<text  x="13.00" y="431.5" >entry_SYSCALL_64_after_hwframe</text>
+</g>
+<g >
+<title>finish_task_switch.isra.0 (58,187 samples, 3.05%)</title><rect x="1068.3" y="261" width="35.9" height="15.0" fill="rgb(222,58,2)" rx="2" ry="2" />
+<text  x="1071.30" y="271.5" >fin..</text>
+</g>
+<g >
+<title>epoll_pwait (136,950 samples, 7.17%)</title><rect x="1068.3" y="437" width="84.6" height="15.0" fill="rgb(222,205,44)" rx="2" ry="2" />
+<text  x="1071.30" y="447.5" >epoll_pwait</text>
+</g>
+<g >
+<title>kvm_lapic_switch_to_sw_timer (150,473 samples, 7.88%)</title><rect x="154.5" y="325" width="93.0" height="15.0" fill="rgb(225,31,23)" rx="2" ry="2" />
+<text  x="157.54" y="335.5" >kvm_lapic_s..</text>
+</g>
+<g >
+<title>__vmx_complete_interrupts (64,429 samples, 3.37%)</title><rect x="704.5" y="309" width="39.8" height="15.0" fill="rgb(239,68,20)" rx="2" ry="2" />
+<text  x="707.54" y="319.5" >__v..</text>
+</g>
+<g >
+<title>handle_fastpath_set_msr_irqoff (43,706 samples, 2.29%)</title><rect x="879.7" y="293" width="27.0" height="15.0" fill="rgb(227,96,12)" rx="2" ry="2" />
+<text  x="882.67" y="303.5" >h..</text>
+</g>
+<g >
+<title>kvm_vcpu_block (651,494 samples, 34.11%)</title><rect x="274.5" y="309" width="402.5" height="15.0" fill="rgb(233,145,44)" rx="2" ry="2" />
+<text  x="277.51" y="319.5" >kvm_vcpu_block</text>
+</g>
+<g >
+<title>kvm_skip_emulated_instruction (43,706 samples, 2.29%)</title><rect x="879.7" y="277" width="27.0" height="15.0" fill="rgb(232,180,53)" rx="2" ry="2" />
+<text  x="882.67" y="287.5" >k..</text>
+</g>
+<g >
+<title>__x64_sys_epoll_pwait (136,950 samples, 7.17%)</title><rect x="1068.3" y="389" width="84.6" height="15.0" fill="rgb(220,184,47)" rx="2" ry="2" />
+<text  x="1071.30" y="399.5" >__x64_sys..</text>
+</g>
+<g >
+<title>trigger_load_balance (36,436 samples, 1.91%)</title><rect x="1072.2" y="101" width="22.5" height="15.0" fill="rgb(227,45,45)" rx="2" ry="2" />
+<text  x="1075.24" y="111.5" >t..</text>
+</g>
+<g >
+<title>kvm_cpu_has_interrupt (44,573 samples, 2.33%)</title><rect x="677.0" y="309" width="27.5" height="15.0" fill="rgb(222,21,35)" rx="2" ry="2" />
+<text  x="680.00" y="319.5" >k..</text>
+</g>
+<g >
+<title>generic_exec_single (36,436 samples, 1.91%)</title><rect x="1072.2" y="53" width="22.5" height="15.0" fill="rgb(249,160,17)" rx="2" ry="2" />
+<text  x="1075.24" y="63.5" >g..</text>
+</g>
+<g >
+<title>native_sched_clock (78,763 samples, 4.12%)</title><rect x="1104.2" y="213" width="48.7" height="15.0" fill="rgb(213,30,10)" rx="2" ry="2" />
+<text  x="1107.25" y="223.5" >nati..</text>
+</g>
+<g >
+<title>kvm_dirty_ring_check_request (65,008 samples, 3.40%)</title><rect x="114.4" y="325" width="40.1" height="15.0" fill="rgb(221,46,38)" rx="2" ry="2" />
+<text  x="117.38" y="335.5" >kvm..</text>
+</g>
+<g >
+<title>tick_sched_timer (36,436 samples, 1.91%)</title><rect x="1072.2" y="165" width="22.5" height="15.0" fill="rgb(211,217,37)" rx="2" ry="2" />
+<text  x="1075.24" y="175.5" >t..</text>
+</g>
+<g >
+<title>__hrtimer_run_queues (36,436 samples, 1.91%)</title><rect x="1072.2" y="181" width="22.5" height="15.0" fill="rgb(216,41,48)" rx="2" ry="2" />
+<text  x="1075.24" y="191.5" >_..</text>
+</g>
+<g >
+<title>vmx_skip_emulated_instruction (43,706 samples, 2.29%)</title><rect x="879.7" y="261" width="27.0" height="15.0" fill="rgb(246,103,11)" rx="2" ry="2" />
+<text  x="882.67" y="271.5" >v..</text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (136,950 samples, 7.17%)</title><rect x="1068.3" y="421" width="84.6" height="15.0" fill="rgb(230,108,22)" rx="2" ry="2" />
+<text  x="1071.30" y="431.5" >entry_SYS..</text>
+</g>
+<g >
+<title>start_sw_timer (150,473 samples, 7.88%)</title><rect x="154.5" y="309" width="93.0" height="15.0" fill="rgb(222,222,5)" rx="2" ry="2" />
+<text  x="157.54" y="319.5" >start_sw_ti..</text>
+</g>
+<g >
+<title>kvm_cpu_has_interrupt (65,008 samples, 3.40%)</title><rect x="292.3" y="245" width="40.2" height="15.0" fill="rgb(222,21,35)" rx="2" ry="2" />
+<text  x="295.35" y="255.5" >kvm..</text>
+</g>
+<g >
+<title>kvm_vcpu_has_events (138,429 samples, 7.25%)</title><rect x="274.5" y="261" width="85.5" height="15.0" fill="rgb(220,203,50)" rx="2" ry="2" />
+<text  x="277.51" y="271.5" >kvm_vcpu_h..</text>
+</g>
+<g >
+<title>dequeue_task (88,246 samples, 4.62%)</title><rect x="400.2" y="261" width="54.5" height="15.0" fill="rgb(219,173,33)" rx="2" ry="2" />
+<text  x="403.19" y="271.5" >deque..</text>
+</g>
+<g >
+<title>ktime_get_update_offsets_now (15,377 samples, 0.81%)</title><rect x="1094.7" y="197" width="9.5" height="15.0" fill="rgb(208,145,43)" rx="2" ry="2" />
+<text  x="1097.75" y="207.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (136,950 samples, 7.17%)</title><rect x="1068.3" y="405" width="84.6" height="15.0" fill="rgb(250,28,43)" rx="2" ry="2" />
+<text  x="1071.30" y="415.5" >do_syscal..</text>
+</g>
+<g >
+<title>kvm_arch_sched_in (44,091 samples, 2.31%)</title><rect x="501.7" y="229" width="27.3" height="15.0" fill="rgb(250,193,0)" rx="2" ry="2" />
+<text  x="504.74" y="239.5" >k..</text>
+</g>
+<g >
+<title>vmx_spec_ctrl_restore_host (153,672 samples, 8.05%)</title><rect x="906.7" y="421" width="94.9" height="15.0" fill="rgb(209,101,20)" rx="2" ry="2" />
+<text  x="909.67" y="431.5" >vmx_spec_ct..</text>
+</g>
+<g >
+<title>x86_emulate_instruction (59,003 samples, 3.09%)</title><rect x="10.0" y="325" width="36.5" height="15.0" fill="rgb(252,206,49)" rx="2" ry="2" />
+<text  x="13.00" y="335.5" >x86..</text>
+</g>
+<g >
+<title>kvm_vcpu_check_block (138,429 samples, 7.25%)</title><rect x="274.5" y="293" width="85.5" height="15.0" fill="rgb(228,76,48)" rx="2" ry="2" />
+<text  x="277.51" y="303.5" >kvm_vcpu_c..</text>
+</g>
+<g >
+<title>vmx_sched_in (44,091 samples, 2.31%)</title><rect x="501.7" y="213" width="27.3" height="15.0" fill="rgb(240,110,29)" rx="2" ry="2" />
+<text  x="504.74" y="223.5" >v..</text>
+</g>
+<g >
+<title>scheduler_tick (36,436 samples, 1.91%)</title><rect x="1072.2" y="117" width="22.5" height="15.0" fill="rgb(205,123,30)" rx="2" ry="2" />
+<text  x="1075.24" y="127.5" >s..</text>
+</g>
+<g >
+<title>__update_idle_core (44,573 samples, 2.33%)</title><rect x="609.3" y="229" width="27.5" height="15.0" fill="rgb(224,16,22)" rx="2" ry="2" />
+<text  x="612.30" y="239.5" >_..</text>
+</g>
+<g >
+<title>kvm_set_user_return_msr (44,945 samples, 2.35%)</title><rect x="824.7" y="293" width="27.7" height="15.0" fill="rgb(236,69,5)" rx="2" ry="2" />
+<text  x="827.67" y="303.5" >k..</text>
+</g>
+<g >
+<title>read_emulated (59,003 samples, 3.09%)</title><rect x="10.0" y="293" width="36.5" height="15.0" fill="rgb(231,33,38)" rx="2" ry="2" />
+<text  x="13.00" y="303.5" >rea..</text>
+</g>
+<g >
+<title>read_prepare (59,003 samples, 3.09%)</title><rect x="10.0" y="261" width="36.5" height="15.0" fill="rgb(213,11,40)" rx="2" ry="2" />
+<text  x="13.00" y="271.5" >rea..</text>
+</g>
+<g >
+<title>switch_fpu_return (65,008 samples, 3.40%)</title><rect x="744.3" y="309" width="40.2" height="15.0" fill="rgb(235,9,36)" rx="2" ry="2" />
+<text  x="747.34" y="319.5" >swi..</text>
+</g>
+<g >
+<title>__schedule (136,950 samples, 7.17%)</title><rect x="1068.3" y="277" width="84.6" height="15.0" fill="rgb(233,151,17)" rx="2" ry="2" />
+<text  x="1071.30" y="287.5" >__schedule</text>
+</g>
+<g >
+<title>tick_sched_handle (36,436 samples, 1.91%)</title><rect x="1072.2" y="149" width="22.5" height="15.0" fill="rgb(223,217,54)" rx="2" ry="2" />
+<text  x="1075.24" y="159.5" >t..</text>
+</g>
+<g >
+<title>nohz_balancer_kick (36,436 samples, 1.91%)</title><rect x="1072.2" y="85" width="22.5" height="15.0" fill="rgb(245,62,47)" rx="2" ry="2" />
+<text  x="1075.24" y="95.5" >n..</text>
+</g>
+<g >
+<title>fc_vcpu (1,713,010 samples, 89.69%)</title><rect x="10.0" y="453" width="1058.3" height="15.0" fill="rgb(213,228,24)" rx="2" ry="2" />
+<text  x="13.00" y="463.5" >fc_vcpu</text>
+</g>
+<g >
+<title>emulator_read_emulated (59,003 samples, 3.09%)</title><rect x="10.0" y="277" width="36.5" height="15.0" fill="rgb(222,39,3)" rx="2" ry="2" />
+<text  x="13.00" y="287.5" >emu..</text>
+</g>
+<g >
+<title>hrtimer_start_range_ns (49,750 samples, 2.60%)</title><rect x="189.5" y="277" width="30.8" height="15.0" fill="rgb(249,39,22)" rx="2" ry="2" />
+<text  x="192.53" y="287.5" >hr..</text>
+</g>
+</g>
+</svg>

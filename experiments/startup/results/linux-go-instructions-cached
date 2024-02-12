@@ -1,0 +1,14 @@
+2023-09-28T13:17:17.606669010 [anonymous-instance:main:WARN:src/devices/src/legacy/serial.rs:257] Failed to register serial input fd: event_manager: failed to manage epoll file descriptor: Operation not permitted (os error 1)
+/home/felix/.local/bin/firecracker: Killed
+
+ Performance counter stats for '/home/felix/.local/bin/firecracker --no-api --config-file configs/linux.json':
+
+       821,500,170      instructions                     #    1.16  insn per cycle            
+       708,564,361      cpu-cycles                                                            
+
+       0.452555209 seconds time elapsed
+
+       0.175156000 seconds user
+       0.039410000 seconds sys
+
+

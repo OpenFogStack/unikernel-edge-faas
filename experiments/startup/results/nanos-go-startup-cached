@@ -1,0 +1,33 @@
+Attaching 26 probes...
+[bash           ] is starting firecracker (pid 941612)
+[firecracker    ] opening /dev/net/tun
+[firecracker    ] fd for tap interface is 13
+[firecracker    ] called clone after 46826295 nsecs
+@file_read[nanos.json]: 625
+@file_read[kernel.img]: 1546764
+@file_time[nanos.json]: 5078
+@file_time[kernel.img]: 1660165
+[fc_vcpu 0      ] vcpu_run first invocation after 47976066 nsecs
+[firecracker    ] first write to tap interface after 65477037 nsecs
+[firecracker    ] ARP (gratuitous) after 65490790 nsecs
+[firecracker    ] ARP (request) after 92766145 nsecs
+[python3        ] tcp_recvmsg 10.10.0.1 -> 10.10.0.2 after 93105618 nsecs
+@execution_time[fc_vcpu 0, kvm_vcpu_halt]: 4433323
+@execution_time[fc_vcpu 0, kvm_mmu_page_fault]: 6786098
+@execution_time[fc_vcpu 0, vmx_handle_exit]: 10660464
+@execution_time[fc_vcpu 0, vmx_vcpu_run]: 14500045
+@execution_time[fc_vcpu 0, vcpu_enter_guest]: 33195072
+@execution_time[fc_vcpu 0, vcpu_run]: 40750789
+@file_read[tun]: 316
+@file_read[nanos.json]: 625
+@file_read[[eventfd]]: 2304
+@file_read[kernel.img]: 1546764
+@file_read[benchmark.img]: 10078208
+@file_time[nanos.json]: 5078
+@file_time[tun]: 6084
+@file_time[[eventfd]]: 106892
+@file_time[kernel.img]: 1660165
+@file_time[benchmark.img]: 3841603
+EXIT after 1350971559 nsecs
+
+@in_vfs_read[941612]: 1202662898824932

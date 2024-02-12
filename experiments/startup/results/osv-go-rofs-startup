@@ -1,0 +1,31 @@
+Attaching 26 probes...
+[bash           ] is starting firecracker (pid 941764)
+[firecracker    ] opening /dev/net/tun
+[firecracker    ] fd for tap interface is 13
+[firecracker    ] called clone after 60333320 nsecs
+@file_read[osv-rofs.json]: 677
+@file_read[loader-stripped.elf]: 6296156
+@file_time[osv-rofs.json]: 4977
+@file_time[loader-stripped.elf]: 19938484
+[fc_vcpu 0      ] vcpu_run first invocation after 61238169 nsecs
+[firecracker    ] first write to tap interface after 88282287 nsecs
+[firecracker    ] ARP (gratuitous) after 88300840 nsecs
+[firecracker    ] ARP (request) after 124341690 nsecs
+[python3        ] tcp_recvmsg 10.10.0.1 -> 10.10.0.2 after 124754657 nsecs
+@execution_time[fc_vcpu 0, kvm_vcpu_halt]: 7248721
+@execution_time[fc_vcpu 0, kvm_mmu_page_fault]: 10094817
+@execution_time[fc_vcpu 0, vmx_handle_exit]: 15669681
+@execution_time[fc_vcpu 0, vmx_vcpu_run]: 21648205
+@execution_time[fc_vcpu 0, vcpu_enter_guest]: 48095955
+@execution_time[fc_vcpu 0, vcpu_run]: 59409507
+@file_read[tun]: 262
+@file_read[osv-rofs.json]: 677
+@file_read[[eventfd]]: 1256
+@file_read[benchmark.raw]: 4746240
+@file_read[loader-stripped.elf]: 6296156
+@file_time[osv-rofs.json]: 4977
+@file_time[tun]: 6559
+@file_time[[eventfd]]: 101585
+@file_time[benchmark.raw]: 10730690
+@file_time[loader-stripped.elf]: 19938484
+EXIT after 1360523837 nsecs

@@ -1,0 +1,31 @@
+Attaching 26 probes...
+[bash           ] is starting firecracker (pid 941660)
+[firecracker    ] opening /dev/net/tun
+[firecracker    ] fd for tap interface is 13
+[firecracker    ] called clone after 92372437 nsecs
+@file_read[linux.json]: 676
+@file_read[vmlinux]: 37735744
+@file_time[linux.json]: 5132
+@file_time[vmlinux]: 43032682
+[fc_vcpu 0      ] vcpu_run first invocation after 93359489 nsecs
+[firecracker    ] first write to tap interface after 289711555 nsecs
+[firecracker    ] ARP (request) after 449095104 nsecs
+[python3        ] tcp_recvmsg 10.10.0.1 -> 10.10.0.2 after 449671057 nsecs
+@execution_time[fc_vcpu 0, kvm_mmu_page_fault]: 18424510
+@execution_time[fc_vcpu 0, vmx_handle_exit]: 28603682
+@execution_time[fc_vcpu 0, kvm_vcpu_halt]: 144261051
+@execution_time[fc_vcpu 0, vmx_vcpu_run]: 155688216
+@execution_time[fc_vcpu 0, vcpu_enter_guest]: 202651361
+@execution_time[fc_vcpu 0, vcpu_run]: 354059788
+@file_read[tun]: 462
+@file_read[linux.json]: 676
+@file_read[[eventfd]]: 1856
+@file_read[benchmark-rootfs.ext4]: 8559616
+@file_read[vmlinux]: 37735744
+@file_time[null]: 1283
+@file_time[linux.json]: 5132
+@file_time[tun]: 20843
+@file_time[[eventfd]]: 280492
+@file_time[benchmark-rootfs.ext4]: 40894305
+@file_time[vmlinux]: 43032682
+EXIT after 1668384279 nsecs
