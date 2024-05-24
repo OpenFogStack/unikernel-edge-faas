@@ -40,6 +40,7 @@ def plot(exp):
     data = df.loc[df["attempt"] == "first"]
     ax = sns.barplot(
         order=order,
+        hue_order=order,
         data=data,
         x="target",
         hue="target",
